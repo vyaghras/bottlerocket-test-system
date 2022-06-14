@@ -14,6 +14,7 @@ use model::{
 use serde_json::Value;
 use snafu::ResultExt;
 use std::collections::BTreeMap;
+use std::fs::read_to_string;
 use structopt::StructOpt;
 
 /// Create an EKS resource, EC2 resource and run Sonobuoy.
@@ -96,6 +97,10 @@ pub(crate) struct RunAwsK8s {
     /// Name of the pull secret for the cluster provider image.
     #[structopt(long)]
     cluster_provider_pull_secret: Option<String>,
+
+    /// Path to eksctl config file.
+    #[structopt(long)]
+    cluster_config_path: Option<String>,
 
     /// Keep the EKS provider agent running after cluster creation.
     #[structopt(long)]
@@ -180,7 +185,6 @@ impl RunAwsK8s {
         let aws_secret_map = self.aws_secret.as_ref().map(|secret_name| {
             btreemap! [ AWS_CREDENTIALS_SECRET_NAME.to_string() => secret_name.clone()]
         });
-
         let eks_resource = self.eks_resource(cluster_resource_name, aws_secret_map.clone())?;
         let ec2_resource = self.ec2_resource(
             &ec2_resource_name,
@@ -322,6 +326,12 @@ impl RunAwsK8s {
         name: &str,
         secrets: Option<BTreeMap<String, SecretName>>,
     ) -> Result<Resource> {
+        let encoded_eksctl_config = self
+            .cluster_config_path
+            .as_ref()
+            .map(|path| read_to_string(path).context(error::FileSnafu { path }))
+            .transpose()?
+            .map(base64::encode);
         Ok(Resource {
             metadata: ObjectMeta {
                 name: Some(name.to_string()),
@@ -343,6 +353,7 @@ impl RunAwsK8s {
                             region: Some(self.region.clone()),
                             zones: None,
                             version: self.cluster_version,
+                            encoded_eksctl_config,
                             assume_role: self.assume_role.clone(),
                         }
                         .into_map()
